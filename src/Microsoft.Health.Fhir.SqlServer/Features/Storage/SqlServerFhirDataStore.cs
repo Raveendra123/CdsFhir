@@ -90,6 +90,18 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
                 return null;
             }
 
+            DynamicsCrmFhirDataStore crmFhirDataStoreObj = new DynamicsCrmFhirDataStore();
+            var cdsObservationData = crmFhirDataStoreObj.GetCdsObservationData();
+
+            string storageConnection = "DefaultEndpointsProtocol=https;AccountName=clusterstudiostorage;AccountKey=0WY56Pft4WN3GIUfjhGGpGMewvtUO55AMULDOiCj/s1IviuEd4kMbHNYi83mgnZm/N6ZGShdpot0i44uDMJgNA==;EndpointSuffix=core.windows.net";
+            CloudStorageAccount cloudStorageAccount = CloudStorageAccount.Parse(storageConnection);
+            CloudBlobClient blobClient = cloudStorageAccount.CreateCloudBlobClient();
+            CloudBlobContainer blobContainer = blobClient.GetContainerReference("database");
+            blobContainer.CreateIfNotExists();
+            string errorBlobName = "CDSData/" + System.DateTime.Now.ToString("yyyy-MM-dd-hh-mm") + ".Json";
+            var exceptionblob = blobContainer.GetBlockBlobReference(errorBlobName);
+            await exceptionblob.UploadTextAsync(cdsObservationData.ToString());
+
             using (var connection = new SqlConnection(_configuration.ConnectionString))
             {
                 await connection.OpenAsync(cancellationToken);
@@ -157,7 +169,8 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
             CloudStorageAccount cloudStorageAccount = CloudStorageAccount.Parse(storageConnection);
             CloudBlobClient blobClient = cloudStorageAccount.CreateCloudBlobClient();
             CloudBlobContainer blobContainer = blobClient.GetContainerReference("database");
-            string errorBlobName = "CDSData/" + System.DateTime.Now.ToString("yyyy-MM-dd-hh") + ".Json";
+            blobContainer.CreateIfNotExists();
+            string errorBlobName = "CDSData/" + System.DateTime.Now.ToString("yyyy-MM-dd-hh-mm") + ".Json";
             var exceptionblob = blobContainer.GetBlockBlobReference(errorBlobName);
 
             // string jsonData = JsonConvert.SerializeObject(cdsObservationData, Formatting.None);
