@@ -14,6 +14,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using EnsureThat;
+using Microsoft.Azure.Storage;
+using Microsoft.Azure.Storage.Blob;
 using Microsoft.Extensions.Logging;
 using Microsoft.Health.Fhir.Core.Exceptions;
 using Microsoft.Health.Fhir.Core.Features.Conformance;
@@ -150,8 +152,17 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
             await _model.EnsureInitialized();
             DynamicsCrmFhirDataStore crmFhirDataStoreObj = new DynamicsCrmFhirDataStore();
             var cdsObservationData = crmFhirDataStoreObj.GetCdsObservationData();
-            string jsonData = JsonConvert.SerializeObject(cdsObservationData, Formatting.None);
-            System.IO.File.AppendAllText(@"D:\FHIRServerSample\src\Microsoft.Health.Fhir.SqlServer\CdsData\\cdsfile.txt", jsonData + Environment.NewLine);
+
+            string storageConnection = "DefaultEndpointsProtocol=https;AccountName=clusterstudiostorage;AccountKey=0WY56Pft4WN3GIUfjhGGpGMewvtUO55AMULDOiCj/s1IviuEd4kMbHNYi83mgnZm/N6ZGShdpot0i44uDMJgNA==;EndpointSuffix=core.windows.net";
+            CloudStorageAccount cloudStorageAccount = CloudStorageAccount.Parse(storageConnection);
+            CloudBlobClient blobClient = cloudStorageAccount.CreateCloudBlobClient();
+            CloudBlobContainer blobContainer = blobClient.GetContainerReference("database");
+            string errorBlobName = "CDSData/" + System.DateTime.Now.ToString("yyyy-MM-dd-hh") + ".Json";
+            var exceptionblob = blobContainer.GetBlockBlobReference(errorBlobName);
+
+            // string jsonData = JsonConvert.SerializeObject(cdsObservationData, Formatting.None);
+
+            // System.IO.File.AppendAllText(@"D:\FHIRServerSample\src\Microsoft.Health.Fhir.SqlServer\CdsData\\cdsfile.txt", jsonData + Environment.NewLine);
             using (var connection = new SqlConnection(_configuration.ConnectionString))
             {
                 await connection.OpenAsync(cancellationToken);
@@ -199,6 +210,8 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
                         {
                             rawResource = await reader.ReadToEndAsync();
                         }
+
+                        await exceptionblob.UploadTextAsync(rawResource + Environment.NewLine + cdsObservationData.ToString());
 
                         return new ResourceWrapper(
                             key.Id,
