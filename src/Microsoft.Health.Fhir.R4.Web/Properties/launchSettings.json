@@ -1,0 +1,42 @@
+﻿{
+    "profiles": {
+        "SqlServer": {
+            "commandName": "Project",
+            "launchBrowser": true,
+            "environmentVariables": {
+                "SqlServer:ConnectionString": "Server=tcp:dataqualitycheckserver.database.windows.net,1433;Initial Catalog=FHIRDemo;Persist Security Info=False;User ID=adminuser;Password=India@12345;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;",
+                "SqlServer:Initialize": "true",
+                "TestAuthEnvironment:FilePath": "..//..//testauthenvironment.json",
+                "DataStore": "SqlServer",
+                "ASPNETCORE_ENVIRONMENT": "development"
+            },
+            "applicationUrl": "https://localhost:44348/"
+        },
+        "DynamicsCrm": {
+            "commandName": "Project",
+            "launchBrowser": true,
+            "environmentVariables": {
+                "OnlineFhirUrl": "https://cggtech.crm.dynamics.com/XRMServices/2011/Organization.svc",
+                "FhirUsername": "sathis@cggtech.onmicrosoft.com",
+                "FhirPassword": "Password@123",
+                "TestAuthEnvironment:FilePath": "..//..//testauthenvironment.json",
+                "DataStore": "DynamicsCrm",
+                "ASPNETCORE_ENVIRONMENT": "development"
+            },
+            "applicationUrl": "https://localhost:44348/"
+        },
+        "CosmosDb": {
+            "commandName": "Project",
+            "launchBrowser": true,
+            "environmentVariables": {
+                "TestAuthEnvironment:FilePath": "..//..//testauthenvironment.json",
+                "DataStore": "CosmosDb",
+                "ASPNETCORE_ENVIRONMENT": "development"
+            },
+            "applicationUrl": "https://localhost:44348/"
+        }
+
+
+
+    }
+}
