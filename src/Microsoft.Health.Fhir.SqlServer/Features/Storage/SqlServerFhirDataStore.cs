@@ -26,7 +26,6 @@ using Microsoft.Health.Fhir.SqlServer.Configs;
 using Microsoft.Health.Fhir.SqlServer.Features.Schema.Model;
 using Microsoft.Health.Fhir.ValueSets;
 using Microsoft.IO;
-using Newtonsoft.Json;
 using Task = System.Threading.Tasks.Task;
 
 namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
@@ -44,6 +43,7 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
         private readonly V1.UpsertResourceTvpGenerator<ResourceMetadata> _upsertResourceTvpGenerator;
         private readonly RecyclableMemoryStreamManager _memoryStreamManager;
         private readonly ILogger<SqlServerFhirDataStore> _logger;
+        private string datastore = "cds";
 
         public SqlServerFhirDataStore(
             SqlServerDataStoreConfiguration configuration,
@@ -79,10 +79,14 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
                 resource.CompartmentIndices,
                 resource.SearchIndices?.ToLookup(e => _searchParameterTypeMap.GetSearchValueType(e)),
                 resource.LastModifiedClaims);
+
+            DynamicsCrmFhirDataStore crmFhirDataStoreObj = new DynamicsCrmFhirDataStore();
+
             try
             {
-                // DynamicsCrmFhirDataStore crmFhirDataStoreObj = new DynamicsCrmFhirDataStore();
-                // var cdsObservationData = crmFhirDataStoreObj.GetCdsObservationData();
+                // Dynamics Crm code
+                // write to Cds
+                crmFhirDataStoreObj.PutCdsObservationData(resource.RawResource.Data);
             }
             catch (Exception ex)
             {
@@ -90,9 +94,6 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
                 return null;
             }
 
-            DynamicsCrmFhirDataStore crmFhirDataStoreObj = new DynamicsCrmFhirDataStore();
-            var cdsObservationData = crmFhirDataStoreObj.GetCdsObservationData();
-
             string storageConnection = "DefaultEndpointsProtocol=https;AccountName=clusterstudiostorage;AccountKey=0WY56Pft4WN3GIUfjhGGpGMewvtUO55AMULDOiCj/s1IviuEd4kMbHNYi83mgnZm/N6ZGShdpot0i44uDMJgNA==;EndpointSuffix=core.windows.net";
             CloudStorageAccount cloudStorageAccount = CloudStorageAccount.Parse(storageConnection);
             CloudBlobClient blobClient = cloudStorageAccount.CreateCloudBlobClient();
@@ -100,70 +101,70 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
             blobContainer.CreateIfNotExists();
             string errorBlobName = "CDSData/" + System.DateTime.Now.ToString("yyyy-MM-dd-hh-mm") + ".Json";
             var exceptionblob = blobContainer.GetBlockBlobReference(errorBlobName);
-            await exceptionblob.UploadTextAsync(cdsObservationData.ToString());
+            var cdsObservationData = crmFhirDataStoreObj.GetCdsObservationData();
+
+            exceptionblob.UploadTextAsync(cdsObservationData.ToString()).GetAwaiter().GetResult();
 
             using (var connection = new SqlConnection(_configuration.ConnectionString))
-            {
-                await connection.OpenAsync(cancellationToken);
-
-                using (var command = connection.CreateCommand())
-                using (var stream = new RecyclableMemoryStream(_memoryStreamManager))
-                using (var gzipStream = new GZipStream(stream, CompressionMode.Compress))
-                using (var writer = new StreamWriter(gzipStream, ResourceEncoding))
                 {
-                    writer.Write(resource.RawResource.Data);
-                    writer.Flush();
+                    await connection.OpenAsync(cancellationToken);
 
-                    stream.Seek(0, 0);
-
-                    V1.UpsertResource.PopulateCommand(
-                        command,
-                        baseResourceSurrogateId: ResourceSurrogateIdHelper.LastUpdatedToResourceSurrogateId(resource.LastModified.UtcDateTime),
-                        resourceTypeId: _model.GetResourceTypeId(resource.ResourceTypeName),
-                        resourceId: resource.ResourceId,
-                        eTag: weakETag == null ? null : (int?)etag,
-                        allowCreate: allowCreate,
-                        isDeleted: resource.IsDeleted,
-                        keepHistory: keepHistory,
-                        requestMethod: resource.Request.Method,
-                        rawResource: stream,
-                        tableValuedParameters: _upsertResourceTvpGenerator.Generate(resourceMetadata));
-
-                    try
+                    using (var command = connection.CreateCommand())
+                    using (var stream = new RecyclableMemoryStream(_memoryStreamManager))
+                    using (var gzipStream = new GZipStream(stream, CompressionMode.Compress))
+                    using (var writer = new StreamWriter(gzipStream, ResourceEncoding))
                     {
-                        var newVersion = (int?)await command.ExecuteScalarAsync(cancellationToken);
-                        if (newVersion == null)
+                        writer.Write(resource.RawResource.Data);
+                        writer.Flush();
+
+                        stream.Seek(0, 0);
+
+                        V1.UpsertResource.PopulateCommand(
+                            command,
+                            baseResourceSurrogateId: ResourceSurrogateIdHelper.LastUpdatedToResourceSurrogateId(resource.LastModified.UtcDateTime),
+                            resourceTypeId: _model.GetResourceTypeId(resource.ResourceTypeName),
+                            resourceId: resource.ResourceId,
+                            eTag: weakETag == null ? null : (int?)etag,
+                            allowCreate: allowCreate,
+                            isDeleted: resource.IsDeleted,
+                            keepHistory: keepHistory,
+                            requestMethod: resource.Request.Method,
+                            rawResource: stream,
+                            tableValuedParameters: _upsertResourceTvpGenerator.Generate(resourceMetadata));
+
+                        try
                         {
-                            // indicates a redundant delete
-                            return null;
+                            var newVersion = (int?)await command.ExecuteScalarAsync(cancellationToken);
+                            if (newVersion == null)
+                            {
+                                // indicates a redundant delete
+                                return null;
+                            }
+
+                            resource.Version = newVersion.ToString();
+
+                            return new UpsertOutcome(resource, newVersion == 1 ? SaveOutcomeType.Created : SaveOutcomeType.Updated);
                         }
-
-                        resource.Version = newVersion.ToString();
-
-                        return new UpsertOutcome(resource, newVersion == 1 ? SaveOutcomeType.Created : SaveOutcomeType.Updated);
-                    }
-                    catch (SqlException e)
-                    {
-                        switch (e.Number)
+                        catch (SqlException e)
                         {
-                            case SqlErrorCodes.NotFound:
-                                throw new MethodNotAllowedException(Core.Resources.ResourceCreationNotAllowed);
-                            case SqlErrorCodes.PreconditionFailed:
-                                throw new ResourceConflictException(weakETag);
-                            default:
-                                _logger.LogError(e, "Error from SQL database on upsert");
-                                throw;
+                            switch (e.Number)
+                            {
+                                case SqlErrorCodes.NotFound:
+                                    throw new MethodNotAllowedException(Core.Resources.ResourceCreationNotAllowed);
+                                case SqlErrorCodes.PreconditionFailed:
+                                    throw new ResourceConflictException(weakETag);
+                                default:
+                                    _logger.LogError(e, "Error from SQL database on upsert");
+                                    throw;
+                            }
                         }
                     }
                 }
-            }
         }
 
         public async Task<ResourceWrapper> GetAsync(ResourceKey key, CancellationToken cancellationToken)
         {
             await _model.EnsureInitialized();
-            DynamicsCrmFhirDataStore crmFhirDataStoreObj = new DynamicsCrmFhirDataStore();
-            var cdsObservationData = crmFhirDataStoreObj.GetCdsObservationData();
 
             string storageConnection = "DefaultEndpointsProtocol=https;AccountName=clusterstudiostorage;AccountKey=0WY56Pft4WN3GIUfjhGGpGMewvtUO55AMULDOiCj/s1IviuEd4kMbHNYi83mgnZm/N6ZGShdpot0i44uDMJgNA==;EndpointSuffix=core.windows.net";
             CloudStorageAccount cloudStorageAccount = CloudStorageAccount.Parse(storageConnection);
@@ -172,74 +173,81 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
             blobContainer.CreateIfNotExists();
             string errorBlobName = "CDSData/" + System.DateTime.Now.ToString("yyyy-MM-dd-hh-mm") + ".Json";
             var exceptionblob = blobContainer.GetBlockBlobReference(errorBlobName);
-
-            // string jsonData = JsonConvert.SerializeObject(cdsObservationData, Formatting.None);
-
-            // System.IO.File.AppendAllText(@"D:\FHIRServerSample\src\Microsoft.Health.Fhir.SqlServer\CdsData\\cdsfile.txt", jsonData + Environment.NewLine);
-            using (var connection = new SqlConnection(_configuration.ConnectionString))
+            if (datastore == "cds")
             {
-                await connection.OpenAsync(cancellationToken);
+                DynamicsCrmFhirDataStore crmFhirDataStoreObj = new DynamicsCrmFhirDataStore();
+                var cdsObservationData = crmFhirDataStoreObj.GetCdsObservationData();
 
-                int? requestedVersion = null;
-                if (!string.IsNullOrEmpty(key.VersionId))
+                exceptionblob.UploadTextAsync(cdsObservationData.ToString()).GetAwaiter().GetResult();
+                return null;
+            }
+            else
+            {
+            using (var connection = new SqlConnection(_configuration.ConnectionString))
                 {
-                    if (!int.TryParse(key.VersionId, out var parsedVersion))
+                    await connection.OpenAsync(cancellationToken);
+
+                    int? requestedVersion = null;
+                    if (!string.IsNullOrEmpty(key.VersionId))
                     {
-                        return null;
-                    }
-
-                    requestedVersion = parsedVersion;
-                }
-
-                using (SqlCommand command = connection.CreateCommand())
-                {
-                    V1.ReadResource.PopulateCommand(
-                        command,
-                        resourceTypeId: _model.GetResourceTypeId(key.ResourceType),
-                        resourceId: key.Id,
-                        version: requestedVersion);
-
-                    using (SqlDataReader sqlDataReader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken))
-                    {
-                        if (!sqlDataReader.Read())
+                        if (!int.TryParse(key.VersionId, out var parsedVersion))
                         {
                             return null;
                         }
 
-                        var resourceTable = V1.Resource;
+                        requestedVersion = parsedVersion;
+                    }
 
-                        (long resourceSurrogateId, int version, bool isDeleted, bool isHistory, Stream rawResourceStream) = sqlDataReader.ReadRow(
-                            resourceTable.ResourceSurrogateId,
-                            resourceTable.Version,
-                            resourceTable.IsDeleted,
-                            resourceTable.IsHistory,
-                            resourceTable.RawResource);
+                    using (SqlCommand command = connection.CreateCommand())
+                    {
+                        V1.ReadResource.PopulateCommand(
+                            command,
+                            resourceTypeId: _model.GetResourceTypeId(key.ResourceType),
+                            resourceId: key.Id,
+                            version: requestedVersion);
 
-                        string rawResource;
-
-                        using (rawResourceStream)
-                        using (var gzipStream = new GZipStream(rawResourceStream, CompressionMode.Decompress))
-                        using (var reader = new StreamReader(gzipStream, ResourceEncoding))
+                        using (SqlDataReader sqlDataReader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken))
                         {
-                            rawResource = await reader.ReadToEndAsync();
+                            if (!sqlDataReader.Read())
+                            {
+                                return null;
+                            }
+
+                            var resourceTable = V1.Resource;
+
+                            (long resourceSurrogateId, int version, bool isDeleted, bool isHistory, Stream rawResourceStream) = sqlDataReader.ReadRow(
+                                resourceTable.ResourceSurrogateId,
+                                resourceTable.Version,
+                                resourceTable.IsDeleted,
+                                resourceTable.IsHistory,
+                                resourceTable.RawResource);
+
+                            string rawResource;
+
+                            using (rawResourceStream)
+                            using (var gzipStream = new GZipStream(rawResourceStream, CompressionMode.Decompress))
+                            using (var reader = new StreamReader(gzipStream, ResourceEncoding))
+                            {
+                                rawResource = await reader.ReadToEndAsync();
+                            }
+
+                            // exceptionblob.UploadTextAsync(rawResource + Environment.NewLine + cdsObservationData.ToString()).GetAwaiter().GetResult();
+
+                            return new ResourceWrapper(
+                                key.Id,
+                                version.ToString(CultureInfo.InvariantCulture),
+                                key.ResourceType,
+                                new RawResource(rawResource, FhirResourceFormat.Json),
+                                null,
+                                new DateTimeOffset(ResourceSurrogateIdHelper.ResourceSurrogateIdToLastUpdated(resourceSurrogateId), TimeSpan.Zero),
+                                isDeleted,
+                                searchIndices: null,
+                                compartmentIndices: null,
+                                lastModifiedClaims: null)
+                            {
+                                IsHistory = isHistory,
+                            };
                         }
-
-                        await exceptionblob.UploadTextAsync(rawResource + Environment.NewLine + cdsObservationData.ToString());
-
-                        return new ResourceWrapper(
-                            key.Id,
-                            version.ToString(CultureInfo.InvariantCulture),
-                            key.ResourceType,
-                            new RawResource(rawResource, FhirResourceFormat.Json),
-                            null,
-                            new DateTimeOffset(ResourceSurrogateIdHelper.ResourceSurrogateIdToLastUpdated(resourceSurrogateId), TimeSpan.Zero),
-                            isDeleted,
-                            searchIndices: null,
-                            compartmentIndices: null,
-                            lastModifiedClaims: null)
-                        {
-                            IsHistory = isHistory,
-                        };
                     }
                 }
             }

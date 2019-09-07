@@ -15,7 +15,26 @@ namespace Microsoft.Health.DynamicsCrm
     {
         private AuthenticationHeaderValue authHeader;
 
-        public OAuthMessageHandler(string serviceUrl, string clientId, string username, string password, HttpMessageHandler innerHandler)
+        public OAuthMessageHandler(string url, string clientId, string username, string password, HttpMessageHandler innerHandler)
+            : base(innerHandler)
+        {
+            // Obtain the Azure Active Directory Authentication Library (ADAL) authentication context.
+
+            AuthenticationParameters ap = AuthenticationParameters.CreateFromResourceUrlAsync(new Uri(url + "/api/data/v9.1/")).Result;
+
+            AuthenticationContext authContext = new AuthenticationContext(ap.Authority, false);
+
+            ClientCredential credential = new ClientCredential("fe4c5bad-24a7-433a-a523-318a435ad676", "n3eIliUcxnEzRLu**G0Z3n.@xCys6kKC");
+
+            string authorityUri = "https://login.microsoftonline.com/2c55b088-a14f-4c9e-8a12-c13454aa56dd/oauth2/authorize";
+
+            AuthenticationContext context = new AuthenticationContext(authorityUri);
+            var authResult = context.AcquireTokenAsync("https://cggtech.crm.dynamics.com", credential);
+
+            authHeader = new AuthenticationHeaderValue("Bearer", authResult.Result.AccessToken);
+        }
+
+        public OAuthMessageHandler(string serviceUrl, string clientId, object redirectUrl, string username, string password, HttpMessageHandler innerHandler)
 
             : base(innerHandler)
         {
@@ -25,12 +44,12 @@ namespace Microsoft.Health.DynamicsCrm
 
             AuthenticationContext authContext = new AuthenticationContext(ap.Authority, false);
 
-            ClientCredential credential = new ClientCredential("d2bff45d-5dba-4f19-8841-d8d979eb6dab", "a+Ly3st-Z6pCmxVhodf/pCLTRHD2Ax?9");
+            ClientCredential credential = new ClientCredential("fe4c5bad-24a7-433a-a523-318a435ad676", "n3eIliUcxnEzRLu**G0Z3n.@xCys6kKC");
 
-            string authorityUri = "https://login.microsoftonline.com/c1159de4-f0a1-46e0-ad9a-b55bc7c24880/oauth2/authorize";
+            string authorityUri = "https://login.microsoftonline.com/2c55b088-a14f-4c9e-8a12-c13454aa56dd/oauth2/authorize";
 
             AuthenticationContext context = new AuthenticationContext(authorityUri);
-            var authResult = context.AcquireTokenAsync("https://ryantest12345.crm.dynamics.com", credential);
+            var authResult = context.AcquireTokenAsync("https://cggtech.crm.dynamics.com", credential);
 
             authHeader = new AuthenticationHeaderValue("Bearer", authResult.Result.AccessToken);
         }
